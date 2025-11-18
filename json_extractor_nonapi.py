@@ -140,21 +140,18 @@ def extract_facilities_history(df_facilities):
         return pd.DataFrame()
 
 
-def extract_pefindo_data(json_path):
+def extract_pefindo_data_from_df(json_df):
     """
-    Main function to extract all Pefindo data tables
+    Extract all Pefindo data tables from a normalized DataFrame
     
     Args:
-        json_path: Path to JSON file
+        json_df: Normalized DataFrame from load_multiple_json_batches
     
     Returns:
         Dictionary containing all DataFrames
     """
     
-    print("Loading JSON data...")
-    data = load_json_data(json_path)
-    json_df = load_multiple_json_batches(data)
-    print(f"Loaded {len(json_df)} records")
+    print(f"Processing {len(json_df)} records")
     
     cols_basic = ['report.header.username', 'report.debitur.nomor_identitas',
                   'report.header.id_report', 'report.header.tgl_permintaan', 
@@ -227,6 +224,24 @@ def extract_pefindo_data(json_path):
     
     print("\n✅ Extraction complete!")
     return dfs
+
+
+def extract_pefindo_data(json_path):
+    """
+    Main function to extract all Pefindo data tables from JSON file
+    
+    Args:
+        json_path: Path to JSON file
+    
+    Returns:
+        Dictionary containing all DataFrames
+    """
+    
+    print("Loading JSON data...")
+    data = load_json_data(json_path)
+    json_df = load_multiple_json_batches(data)
+    
+    return extract_pefindo_data_from_df(json_df)
 
 
 def main():
