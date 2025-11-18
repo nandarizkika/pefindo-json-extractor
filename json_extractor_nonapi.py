@@ -8,10 +8,36 @@ import json
 
 
 def load_json_data(json_path):
-    """Load JSON file and normalize to DataFrame"""
+    """Load JSON file"""
     with open(json_path, 'r') as file:
         data = json.load(file)
-    return pd.json_normalize(data)
+    return data
+
+
+def load_multiple_json_batches(data_dict):
+    """Load JSON dictionary with multiple batch keys and combine into single DataFrame"""
+    
+    if 'all_data' in data_dict:
+        data = data_dict['all_data']
+    else:
+        data = data_dict
+    
+    if isinstance(data, dict) and not any(key.startswith('report') for key in data.keys()):
+        all_batches = []
+        
+        for batch_name, batch_data in data.items():
+            print(f"  Loading batch: {batch_name}")
+            batch_df = pd.json_normalize(batch_data)
+            batch_df['batch_name'] = batch_name
+            all_batches.append(batch_df)
+        
+        combined_df = pd.concat(all_batches, ignore_index=True)
+        print(f"  Combined {len(data)} batches into {len(combined_df)} records")
+        return combined_df
+    else:
+        df = pd.json_normalize(data)
+        df['batch_name'] = 'default'
+        return df
 
 
 def clean_column_names(df):
@@ -42,7 +68,8 @@ def extract_list_to_dataframe(json_df, column_name, cols_to_add):
             temp_df = pd.DataFrame(item_list)
             
             for col in cols_to_add:
-                temp_df[col] = json_df[col][i]
+                if col in json_df.columns:
+                    temp_df[col] = json_df[col][i]
             
             all_rows.append(temp_df)
     
@@ -65,11 +92,11 @@ def extract_facilities_history(df_facilities):
     """
     all_rows = []
     
-    cols_to_add = [ 'username', 'nomor_identitas',
+    cols_to_add = ['username', 'nomor_identitas',
                    'id_report', 'tgl_permintaan', 'npwp', 'email', 'telepon',
                    'nomor_rekening_fasilitas', 'id_jenis_fasilitas',
-                   'id_pelapor', 'id_jenis_pelapor', 'id_jenis_kredit', 'id_sifat_kredit']
-    
+                   'id_pelapor', 'id_jenis_pelapor', 'id_jenis_kredit', 'id_sifat_kredit',
+                   'batch_name']
     
     sample_keys = None
     for riwayat in df_facilities['riwayat_fasilitas']:
@@ -77,34 +104,40 @@ def extract_facilities_history(df_facilities):
             sample_keys = list(riwayat[0].keys())
             break
     
+    if sample_keys is None:
+        return pd.DataFrame()
+    
     matching_cols = [col for col in df_facilities.columns if col in sample_keys]
     
     for i in range(len(df_facilities)):
         riwayat_list = df_facilities['riwayat_fasilitas'][i]
         
         if riwayat_list:
-            
             temp_df = pd.DataFrame(riwayat_list)
             
             for col in cols_to_add:
-                temp_df[col] = df_facilities[col][i]
+                if col in df_facilities.columns:
+                    temp_df[col] = df_facilities[col][i]
             
             all_rows.append(temp_df)
         else:
-            
             temp_df = df_facilities.iloc[[i]][matching_cols].copy()
             
-            
             temp_df['snapshot_order'] = 1
-            temp_df['status_tunggakan'] = 1 if df_facilities['tunggakan_pokok'][i] > 0 else 0
+            if 'tunggakan_pokok' in df_facilities.columns:
+                temp_df['status_tunggakan'] = 1 if df_facilities['tunggakan_pokok'][i] > 0 else 0
             
             for col in cols_to_add:
-                temp_df[col] = df_facilities[col][i]
+                if col in df_facilities.columns:
+                    temp_df[col] = df_facilities[col][i]
             
             all_rows.append(temp_df)
     
-    result_df = pd.concat(all_rows, ignore_index=True)
-    return clean_column_names(result_df)
+    if all_rows:
+        result_df = pd.concat(all_rows, ignore_index=True)
+        return clean_column_names(result_df)
+    else:
+        return pd.DataFrame()
 
 
 def extract_pefindo_data(json_path):
@@ -119,46 +152,42 @@ def extract_pefindo_data(json_path):
     """
     
     print("Loading JSON data...")
-    json_df = load_json_data(json_path)
+    data = load_json_data(json_path)
+    json_df = load_multiple_json_batches(data)
     print(f"Loaded {len(json_df)} records")
     
-    
-    cols_basic = [ 'report.header.username', 'report.debitur.nomor_identitas',
+    cols_basic = ['report.header.username', 'report.debitur.nomor_identitas',
                   'report.header.id_report', 'report.header.tgl_permintaan', 
-                  'report.debitur.npwp', 'report.debitur.email', 'report.debitur.telepon']
+                  'report.debitur.npwp', 'report.debitur.email', 'report.debitur.telepon',
+                  'batch_name']
     
-    cols_facilities = [ 'username', 'nomor_identitas',
+    cols_facilities = ['username', 'nomor_identitas',
                        'id_report', 'tgl_permintaan', 'npwp', 'email', 'telepon',
                        'nomor_rekening_fasilitas', 'id_jenis_fasilitas',
-                       'id_pelapor', 'id_jenis_pelapor', 'id_jenis_kredit', 'id_sifat_kredit']
-    
+                       'id_pelapor', 'id_jenis_pelapor', 'id_jenis_kredit', 'id_sifat_kredit',
+                       'batch_name']
     
     dfs = {}
-    
     
     print("Extracting pefindo_scoring...")
     dfs['pefindo_scoring'] = extract_list_to_dataframe(json_df, 'scoring', cols_basic)
     print(f"  Shape: {dfs['pefindo_scoring'].shape}")
     
-    
     print("Extracting pefindo_information_summary...")
     debitur_cols = [col for col in json_df.columns if 'report.debitur' in col]
-    debitur_cols.extend([
-                        'report.header.username', 'report.header.id_report', 
-                        'report.header.tgl_permintaan'])
+    debitur_cols.extend(['report.header.username', 'report.header.id_report', 
+                        'report.header.tgl_permintaan', 'batch_name'])
+    debitur_cols = [col for col in debitur_cols if col in json_df.columns]
     dfs['pefindo_information_summary'] = clean_column_names(json_df[debitur_cols])
     print(f"  Shape: {dfs['pefindo_information_summary'].shape}")
-    
     
     print("Extracting pefindo_facilities...")
     dfs['pefindo_facilities'] = extract_list_to_dataframe(json_df, 'report.fasilitas', cols_basic)
     print(f"  Shape: {dfs['pefindo_facilities'].shape}")
     
-    
     print("Extracting pefindo_facilities_history...")
     dfs['pefindo_facilities_history'] = extract_facilities_history(dfs['pefindo_facilities'])
     print(f"  Shape: {dfs['pefindo_facilities_history'].shape}")
-    
     
     print("Extracting pefindo_facilities_collateral...")
     dfs['pefindo_facilities_collateral'] = extract_list_to_dataframe(
@@ -166,13 +195,11 @@ def extract_pefindo_data(json_path):
     )
     print(f"  Shape: {dfs['pefindo_facilities_collateral'].shape}")
     
-    
     print("Extracting pefindo_facilities_guarantor...")
     dfs['pefindo_facilities_guarantor'] = extract_list_to_dataframe(
         dfs['pefindo_facilities'], 'penjamin', cols_facilities
     )
     print(f"  Shape: {dfs['pefindo_facilities_guarantor'].shape}")
-    
     
     print("Extracting pefindo_inquiry...")
     dfs['pefindo_inquiry'] = extract_list_to_dataframe(
@@ -180,13 +207,11 @@ def extract_pefindo_data(json_path):
     )
     print(f"  Shape: {dfs['pefindo_inquiry'].shape}")
     
-    
     print("Extracting pefindo_inquiry_summary...")
     dfs['pefindo_inquiry_summary'] = extract_list_to_dataframe(
         json_df, 'report.summary_permintaan_data', cols_basic
     )
     print(f"  Shape: {dfs['pefindo_inquiry_summary'].shape}")
-    
     
     print("Extracting pefindo_information_history...")
     dfs['pefindo_information_history'] = extract_list_to_dataframe(
@@ -194,12 +219,11 @@ def extract_pefindo_data(json_path):
     )
     print(f"  Shape: {dfs['pefindo_information_history'].shape}")
     
-    
     print("Extracting pefindo_collectibility_history...")
     dfs['pefindo_collectibility_history'] = extract_list_to_dataframe(
         json_df, 'report.summary_riwayat_debitur', cols_basic
     )
-    print(f"  Shape: {dfs['pefindo_information_history'].shape}")
+    print(f"  Shape: {dfs['pefindo_collectibility_history'].shape}")
     
     print("\n✅ Extraction complete!")
     return dfs
@@ -210,9 +234,7 @@ def main():
     
     json_path = '../json_file/pefindo-staging-data.json'
     
-    
     dataframes = extract_pefindo_data(json_path)
-    
     
     print("\n" + "="*60)
     print("EXTRACTION SUMMARY")
@@ -228,10 +250,4 @@ def main():
 
 
 if __name__ == "__main__":
-    
     dfs = main()
-    
-    
-    
-    
-    
